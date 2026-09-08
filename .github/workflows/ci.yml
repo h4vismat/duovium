@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain: ["1.96.0", stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo test --locked
+      - run: cargo test --locked --features postgres
+      - run: cargo clippy --locked --all-features --all-targets -- -D warnings
+      - run: cargo doc --locked --no-deps --features postgres
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - run: cargo run --locked --example counter
+      - run: cargo package --locked --features postgres
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: duovium
+          POSTGRES_PASSWORD: duovium
+          POSTGRES_DB: duovium
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://duovium:duovium@localhost:5432/duovium
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked --features postgres-tests -- --test-threads=1
+      - name: Prepare the separate schema used to check SQL metadata
+        run: |
+          for migration in migrations/*.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - run: cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features postgres,rustls
+      - run: cargo sqlx prepare --check -- --all-features --all-targets
+        env:
+          SQLX_OFFLINE: "false"

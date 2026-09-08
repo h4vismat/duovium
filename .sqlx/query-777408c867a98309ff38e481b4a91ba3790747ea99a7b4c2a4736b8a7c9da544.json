@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE projection_checkpoints\n               SET cursor_xact = '0'::xid8, cursor_seq = 0, failures = 0, revision = revision + 1,\n                   halted_at = NULL, last_error = NULL, updated_at = now()\n             WHERE projection = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "777408c867a98309ff38e481b4a91ba3790747ea99a7b4c2a4736b8a7c9da544"
+}

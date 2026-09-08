@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO events (\n                    event_id, stream_type, stream_id, version,\n                    event_name, event_version, payload,\n                    correlation_id, causation_id, metadata, recorded_at\n                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Int4",
+        "Jsonb",
+        "Uuid",
+        "Uuid",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2e21c5909035786f9d40466cab7032ae1c3d6a3bcc46888cb4be8bdae335a731"
+}

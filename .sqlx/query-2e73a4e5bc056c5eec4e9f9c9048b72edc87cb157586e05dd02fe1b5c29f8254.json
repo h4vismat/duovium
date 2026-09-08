@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE projection_checkpoints\n               SET failures = failures + 1,\n                   last_error = $2,\n                   -- `ELSE halted_at` is load-bearing: without it every\n                   -- attempt below the threshold writes NULL, which would\n                   -- clear a halt this statement never set.\n                   halted_at = CASE WHEN failures + 1 >= $3 THEN now()\n                                    ELSE halted_at END,\n                   updated_at = now()\n             WHERE projection = $1 AND revision = $4 AND halted_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2e73a4e5bc056c5eec4e9f9c9048b72edc87cb157586e05dd02fe1b5c29f8254"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO projection_checkpoints (projection) VALUES ($1)\n            ON CONFLICT (projection) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6eaa695ea6eb5e5ffba853f1084de8d79eb1c5892e42a886bca788c7fae85cac"
+}

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT projection FROM projection_checkpoints\n             WHERE projection = $1\n               FOR UPDATE\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "projection",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projection_checkpoints",
+            "name": "projection"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ec741ab72a2660ed4ded3ede9c90b053cef1409c09458eaefbc0d5736612fd3b"
+}

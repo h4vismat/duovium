@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE projection_checkpoints\n               SET cursor_xact = CAST($2 AS xid8), cursor_seq = $3,\n                   failures = 0, last_error = NULL, revision = revision + 1, updated_at = now()\n             WHERE projection = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        {
+          "Custom": {
+            "name": "xid8",
+            "kind": "Simple"
+          }
+        },
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "527b0d817243c32d2907d13b123adc3df23028c72d62af84ee86833069491c43"
+}

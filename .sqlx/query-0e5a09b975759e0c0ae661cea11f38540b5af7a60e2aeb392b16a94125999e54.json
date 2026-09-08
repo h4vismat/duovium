@@ -1,0 +1,163 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT xact_id::text AS \"xact_id!\", global_seq,\n                   event_id, stream_id, version, event_name, event_version, payload,\n                   correlation_id, causation_id, metadata, recorded_at\n              FROM events\n             WHERE stream_type = $1\n               AND (xact_id, global_seq) > (CAST($2 AS xid8), $3)\n               AND xact_id < pg_snapshot_xmin(pg_current_snapshot())\n             ORDER BY xact_id, global_seq\n             LIMIT $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "xact_id!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "global_seq",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "global_seq"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "event_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "stream_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "stream_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "event_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "event_name"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "event_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "event_version"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "payload"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "correlation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "correlation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "causation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "causation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "metadata",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "metadata"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "recorded_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "recorded_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        {
+          "Custom": {
+            "name": "xid8",
+            "kind": "Simple"
+          }
+        },
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "0e5a09b975759e0c0ae661cea11f38540b5af7a60e2aeb392b16a94125999e54"
+}

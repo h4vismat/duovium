@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT cursor_xact::text AS \"cursor_xact!\", cursor_seq, halted_at, revision\n              FROM projection_checkpoints\n             WHERE projection = $1\n               FOR UPDATE SKIP LOCKED\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cursor_xact!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "cursor_seq",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "projection_checkpoints",
+            "name": "cursor_seq"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "halted_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "projection_checkpoints",
+            "name": "halted_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "revision",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "projection_checkpoints",
+            "name": "revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "e63d7c6c996048d214b38ca8882398f831acc0651964d67711d455dd6cb30a62"
+}

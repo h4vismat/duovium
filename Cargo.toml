@@ -1,0 +1,57 @@
+[package]
+name = "duovium"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+description = "Functional CQRS and event-sourcing primitives with an optional PostgreSQL adapter"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/h4vismat/duovium"
+keywords = ["cqrs", "event-sourcing", "ddd", "postgres"]
+categories = ["database", "asynchronous"]
+include = ["src/**", "migrations/**", ".sqlx/**", "examples/**", "README.md", "LICENSE*", "Cargo.toml", "Cargo.lock"]
+
+[package.metadata.docs.rs]
+features = ["postgres"]
+
+[dependencies]
+# The command port must be usable behind `dyn`. `EventStore`'s methods return
+# an unnameable `impl Future`, which is not dyn-compatible, so the port that
+# erases an executor boxes its futures instead.
+async-trait = "0.1.92"
+chrono = { version = "0.4.45", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+uuid = { version = "1.24.0", features = ["serde", "v7"] }
+# Optional, so the pure kernel — types, events, aggregates, the executor, and
+# the in-memory store — compiles with no database dependency at all.
+# `default-features = false` drops the `any` driver and the native-tls stack;
+# TLS uses rustls with ring; ring may require a C toolchain on some targets.
+sqlx = { version = "0.9", default-features = false, optional = true, features = [
+    "runtime-tokio",
+    "tls-rustls-ring",
+    "postgres",
+    "macros",
+    "migrate",
+    "json",
+    "uuid",
+    "chrono",
+] }
+# The runner's loop sleeps between ticks. `sqlx`'s `runtime-tokio` already
+# pulls tokio in transitively, so this only makes an existing dependency
+# explicit — and optional, because only the runner needs it.
+tokio = { version = "1.53.1", default-features = false, optional = true, features = [
+    "time",
+] }
+
+[dev-dependencies]
+# Runtime and macro features are used by tests and runnable examples.
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = []
+postgres = ["dep:sqlx", "dep:tokio"]
+# Tests that need a live PostgreSQL server. Off by default, so `cargo test`
+# passes on a machine that has none.
+postgres-tests = ["postgres"]
