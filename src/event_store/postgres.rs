@@ -6,7 +6,7 @@
 use std::marker::PhantomData;
 
 use chrono::Utc;
-use sqlx::{PgConnection, PgPool};
+use sqlx::{Acquire, PgConnection, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
@@ -18,6 +18,10 @@ use crate::{
 /// it in a 23505, which is how a lost race is told from any other unique
 /// violation on the table.
 const STREAM_VERSION_CONSTRAINT: &str = "events_stream_version_key";
+
+#[cfg(all(test, feature = "postgres-tests"))]
+#[path = "postgres/transaction_tests.rs"]
+mod transaction_tests;
 
 fn store_failure(error: sqlx::Error) -> AppendError<StoreError> {
     AppendError::Store(StoreError::from(error))
@@ -71,44 +75,6 @@ impl<ID, E, C> PostgresEventStore<ID, E, C> {
             _marker: PhantomData,
         }
     }
-
-    /// Reads the current version on a fresh connection. Called after a failed
-    /// transaction has already rolled back, so it cannot reuse that
-    /// transaction's connection.
-    async fn current_version(
-        &self,
-        stream_type: &str,
-        key: &str,
-    ) -> Result<Option<Version>, StoreError> {
-        let mut connection = self.pool.acquire().await.map_err(StoreError::from)?;
-
-        current_version_in(&mut connection, stream_type, key).await
-    }
-
-    /// Inspects the error by reference and consumes it only on the
-    /// non-conflict path: `sqlx::Error` is neither `Clone` nor convertible
-    /// from a reference, so it cannot be classified by converting it first.
-    async fn classify_insert_failure(
-        &self,
-        error: sqlx::Error,
-        expected: ExpectedVersion,
-        stream_type: &str,
-        key: &str,
-    ) -> AppendError<StoreError> {
-        let lost_the_version = error
-            .as_database_error()
-            .and_then(|database_error| database_error.constraint())
-            .is_some_and(|constraint| constraint == STREAM_VERSION_CONSTRAINT);
-
-        if !lost_the_version {
-            return AppendError::Store(StoreError::from(error));
-        }
-
-        match self.current_version(stream_type, key).await {
-            Ok(actual) => AppendError::Conflict { expected, actual },
-            Err(error) => AppendError::Store(error),
-        }
-    }
 }
 
 /// A stored version is a `BIGINT`, so the conversion back can fail. It never
@@ -119,15 +85,20 @@ fn to_version(stored: i64) -> Result<Version, StoreError> {
         .map_err(|_| StoreError::Other(format!("stored version {stored} is negative")))
 }
 
-impl<ID, E, C> EventStore<ID, E> for PostgresEventStore<ID, E, C>
+impl<ID, E, C> PostgresEventStore<ID, E, C>
 where
     ID: StreamId + Clone,
     E: Event,
     C: EventCodec<E>,
 {
-    type Error = StoreError;
-
-    async fn read(&self, stream_id: &ID) -> Result<Vec<Envelope<ID, E>>, Self::Error> {
+    /// Reads using the supplied connection's snapshot, including its own
+    /// uncommitted appends. No connection is acquired from this store's pool.
+    /// Unlike [`EventStore::read`], the returned events need not be committed.
+    pub async fn read_in(
+        &self,
+        connection: &mut PgConnection,
+        stream_id: &ID,
+    ) -> Result<Vec<Envelope<ID, E>>, StoreError> {
         let rows = sqlx::query!(
             r#"
             SELECT event_id, version, event_name, event_version, payload,
@@ -139,7 +110,7 @@ where
             ID::stream_type(),
             stream_id.to_key(),
         )
-        .fetch_all(&self.pool)
+        .fetch_all(connection)
         .await
         .map_err(StoreError::from)?;
 
@@ -176,24 +147,75 @@ where
             .collect::<Result<Vec<_>, StoreError>>()
     }
 
-    async fn append(
+    /// Appends inside a caller-owned transaction without committing it.
+    ///
+    /// The returned version is provisional until the caller commits. Other
+    /// streams and application writes can share that outer transaction.
+    /// Each call uses a savepoint: an append error rolls back this batch, not
+    /// earlier caller writes. A cleanup/transport error requires discarding
+    /// the outer transaction. Cancellation queues savepoint rollback through
+    /// SQLx; callers should roll back the entire business operation.
+    ///
+    /// No second connection is acquired, including for conflict reporting.
+    /// `actual` is observed using the caller's isolation level. Serialization
+    /// failures require retrying the whole outer transaction with fresh state.
+    /// The caller owns retries, stream ordering and request deduplication.
+    /// Empty batches check the observed version but do not reserve the stream.
+    pub async fn append_in(
         &self,
+        transaction: &mut Transaction<'_, Postgres>,
         stream_id: &ID,
         expected_version: ExpectedVersion,
         events: Vec<Proposed<E>>,
-    ) -> Result<Version, AppendError<Self::Error>> {
+    ) -> Result<Version, AppendError<StoreError>> {
+        let mut savepoint = transaction.begin().await.map_err(store_failure)?;
+        match self
+            .append_batch(&mut savepoint, stream_id, expected_version, events)
+            .await
+        {
+            Ok(version) => {
+                savepoint.commit().await.map_err(store_failure)?;
+                Ok(version)
+            }
+            Err(error) => {
+                // Clean up before querying: a SQL error aborts the savepoint.
+                // Reuse the caller's connection, even with a one-connection pool.
+                savepoint.rollback().await.map_err(store_failure)?;
+                if matches!(&error, AppendError::Store(StoreError::UniqueViolation { constraint })
+                    if constraint == STREAM_VERSION_CONSTRAINT)
+                {
+                    let actual =
+                        current_version_in(transaction, ID::stream_type(), &stream_id.to_key())
+                            .await
+                            .map_err(AppendError::Store)?;
+                    Err(AppendError::Conflict {
+                        expected: expected_version,
+                        actual,
+                    })
+                } else {
+                    Err(error)
+                }
+            }
+        }
+    }
+
+    async fn append_batch(
+        &self,
+        connection: &mut PgConnection,
+        stream_id: &ID,
+        expected_version: ExpectedVersion,
+        events: Vec<Proposed<E>>,
+    ) -> Result<Version, AppendError<StoreError>> {
         let stream_type = ID::stream_type();
         let key = stream_id.to_key();
 
         // An empty batch inserts nothing, so the unique constraint that
         // detects a lost race never fires. Without this guard `NoStream`
-        // against an existing stream would commit and report `Version::new(0)`
+        // against an existing stream would accept and report `Version::new(0)`
         // — a version the migration's `CHECK (version > 0)` guarantees never
-        // exists in storage. Resolve the same way `InMemoryEventStore` does,
-        // and open no transaction: there is nothing to write or roll back.
+        // exists in storage. Resolve the same way `InMemoryEventStore` does.
         if events.is_empty() {
-            let current = self
-                .current_version(stream_type, &key)
+            let current = current_version_in(connection, stream_type, &key)
                 .await
                 .map_err(AppendError::Store)?;
 
@@ -208,15 +230,13 @@ where
             };
         }
 
-        let mut transaction = self.pool.begin().await.map_err(store_failure)?;
-
         // `NoStream` needs no read: a non-empty stream already holds version 1,
         // so the unique constraint rejects the insert. `Exact` and `Any` both
         // need the current version, for different reasons.
         let current = match expected_version {
             ExpectedVersion::NoStream => None,
             ExpectedVersion::Exact(_) | ExpectedVersion::Any => {
-                current_version_in(&mut transaction, stream_type, &key)
+                current_version_in(connection, stream_type, &key)
                     .await
                     .map_err(AppendError::Store)?
             }
@@ -230,8 +250,6 @@ where
             // constraint cannot catch a stale caller, only a concurrent one.
             ExpectedVersion::Exact(expected) if current == Some(expected) => expected,
             ExpectedVersion::Exact(_) => {
-                let _ = transaction.rollback().await;
-
                 return Err(AppendError::Conflict {
                     expected: expected_version,
                     actual: current,
@@ -299,7 +317,7 @@ where
                 )))
             })?;
 
-            let written = sqlx::query!(
+            sqlx::query!(
                 r#"
                 INSERT INTO events (
                     event_id, stream_type, stream_id, version,
@@ -319,23 +337,48 @@ where
                 metadata,
                 recorded_at,
             )
-            .execute(&mut *transaction)
-            .await;
-
-            if let Err(error) = written {
-                // Rolled back explicitly, and before the report is assembled:
-                // reading the current version needs a connection of its own.
-                let _ = transaction.rollback().await;
-
-                return Err(self
-                    .classify_insert_failure(error, expected_version, stream_type, &key)
-                    .await);
-            }
+            .execute(&mut *connection)
+            .await
+            .map_err(store_failure)?;
         }
 
-        transaction.commit().await.map_err(store_failure)?;
-
         Ok(version)
+    }
+}
+
+impl<ID, E, C> EventStore<ID, E> for PostgresEventStore<ID, E, C>
+where
+    ID: StreamId + Clone,
+    E: Event,
+    C: EventCodec<E>,
+{
+    type Error = StoreError;
+
+    async fn read(&self, stream_id: &ID) -> Result<Vec<Envelope<ID, E>>, Self::Error> {
+        let mut connection = self.pool.acquire().await.map_err(StoreError::from)?;
+        self.read_in(&mut connection, stream_id).await
+    }
+
+    async fn append(
+        &self,
+        stream_id: &ID,
+        expected_version: ExpectedVersion,
+        events: Vec<Proposed<E>>,
+    ) -> Result<Version, AppendError<Self::Error>> {
+        let mut transaction = self.pool.begin().await.map_err(store_failure)?;
+        match self
+            .append_in(&mut transaction, stream_id, expected_version, events)
+            .await
+        {
+            Ok(version) => {
+                transaction.commit().await.map_err(store_failure)?;
+                Ok(version)
+            }
+            Err(error) => {
+                transaction.rollback().await.map_err(store_failure)?;
+                Err(error)
+            }
+        }
     }
 }
 

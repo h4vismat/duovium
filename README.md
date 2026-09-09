@@ -100,6 +100,49 @@ Implement `StreamId` for a domain ID type: its `stream_type` must be globally un
 `to_key` injective, and `from_key` its inverse. `PostgresEventStore::<Id, Event>::new(pool)`
 uses `JsonEventCodec`, which requires Serde only on the stored event type.
 
+### Caller-owned transactions (0.1.1+)
+
+Use `PostgresEventStore::read_in` and `append_in` when event streams must commit
+with application writes, such as an outbox, request receipt, or payment attempt.
+`read_in(&mut PgConnection, &id)` uses the supplied connection's snapshot,
+including its own uncommitted events. `append_in(&mut sqlx::Transaction<Postgres>,
+&id, expected, events)` returns a **provisional** version: only the caller's outer
+commit makes the events durable. Neither method acquires another pool connection.
+
+Each `append_in` uses a savepoint. An append error rolls back that call's entire
+batch, including failures after earlier events were inserted. Earlier application
+writes and successful appends remain in the caller's transaction. Roll back the
+whole transaction when the business operation must fail as a unit. A cleanup or
+transport failure requires discarding the transaction. Dropping an in-flight
+append queues savepoint rollback through SQLx; cancel the entire business operation
+by dropping or rolling back the outer transaction too.
+
+Multiple streams can share the same outer transaction. Access them in a consistent
+order to avoid deadlocks. Expected versions protect changed streams, not invariants
+across unrelated streams or tables; the application must coordinate those separately.
+An empty append checks the observed version but does not reserve the stream against
+later concurrent writes. Conflict reports observe the caller's isolation level.
+Under repeatable-read or serializable isolation, restart the outer transaction
+when a stale snapshot or serialization failure prevents progress. Retries of the
+whole operation belong to the caller, not the existing `Executor`.
+
+The standalone `EventStore::read` and `append` remain available, with their existing
+committed-read and self-committing append contracts. Both paths use the same codec
+and persistence implementation. No database migration is needed for these APIs.
+
+See [`examples/transactional_outbox.rs`](https://github.com/h4vismat/duovium/blob/main/examples/transactional_outbox.rs) for pure
+aggregate decisions followed by an atomic event/outbox commit, using a one-connection
+pool. Run it against a disposable database:
+
+```sh
+cargo run --locked --features postgres --example transactional_outbox
+```
+
+Set `DATABASE_URL` to that database first. The example creates an application-owned
+`example_outbox` table. A production application also needs stable request
+deduplication and a delivery worker; committing an outbox does not guarantee
+exactly-once external effects. Keep delivery out of replayable projections.
+
 ### Event evolution
 
 `EventCodec<E>` encodes current events and decodes stored `(name, version, payload)`.
@@ -188,6 +231,6 @@ runs the database suite, and builds the package offline.
 
 ## License
 
-Licensed under the [MIT license](LICENSE). Copyright (c) 2026 h4vismat.
+Licensed under the [MIT license](https://github.com/h4vismat/duovium/blob/main/LICENSE). Copyright (c) 2026 h4vismat.
 
 Repository: [h4vismat/duovium](https://github.com/h4vismat/duovium).
