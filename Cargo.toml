@@ -1,6 +1,6 @@
 [package]
 name = "duovium"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.96"
 description = "Functional CQRS and event-sourcing primitives with an optional PostgreSQL adapter"
@@ -9,7 +9,7 @@ license = "MIT"
 repository = "https://github.com/h4vismat/duovium"
 keywords = ["cqrs", "event-sourcing", "ddd", "postgres"]
 categories = ["database", "asynchronous"]
-include = ["src/**", "migrations/**", ".sqlx/**", "examples/**", "README.md", "LICENSE*", "Cargo.toml", "Cargo.lock"]
+include = ["src/**", "tests/**", "migrations/**", ".sqlx/**", "examples/**", "README.md", "CHANGELOG.md", "LICENSE*", "Cargo.toml", "Cargo.lock"]
 
 [package.metadata.docs.rs]
 features = ["postgres"]
@@ -55,3 +55,7 @@ postgres = ["dep:sqlx", "dep:tokio"]
 # Tests that need a live PostgreSQL server. Off by default, so `cargo test`
 # passes on a machine that has none.
 postgres-tests = ["postgres"]
+
+[[example]]
+name = "transactional_outbox"
+required-features = ["postgres"]
